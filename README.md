@@ -1,13 +1,13 @@
 # Opsview Ansible Modules
 
-![Opsview Logo](https://raw.githubusercontent.com/jpgxs/pyopsview/master/opsview.png)
+**Ansible modules for interacting with Opsview Monitor!**
 
-Ansible modules for interacting with Opsview Monitor!
+![Opsview Logo](https://raw.githubusercontent.com/jpgxs/pyopsview/master/opsview.png)
 
 ## Requirements
 
-* ansible >= 2.0
-* pyopsview >= 5.3.2
+* [ansible](https://github.com/ansible/ansible "ansible") >= 2.0
+* [pyopsview](https://github.com/jpgxs/pyopsview "pyopsview") >= 5.3.2
 
 ## Installing 
 
@@ -15,8 +15,11 @@ Ansible modules for interacting with Opsview Monitor!
 # Replace /etc/ansible with wherever your playbooks live
 
 sudo pip install 'pyopsview>=5.3.2'
+
 sudo mkdir /etc/ansible/library
+
 git clone https://github.com/jpgxs/ansible-modules-opsview.git
+
 sudo cp -p ansible-modules-opsview/library/*.py /etc/ansible/library
 ```
 
