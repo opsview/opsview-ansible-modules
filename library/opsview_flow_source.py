@@ -16,10 +16,10 @@ ANSIBLE_METADATA = {'metadata_version': '1.1',
 
 DOCUMENTATION = """\
 ---
-module: opsview_host_group
-short_description: Manages Opsview Host Groups
+module: opsview_flow_source
+short_description: Manages Opsview sFlow and NetFlow sources
 description:
-  - Manages Host Groups within Opsview.
+  - Manages sFlow and NetFlow sources in Opsview.
 version_added: '2.3'
 author: Joshua Griffiths (@jpgxs)
 requirements: [pyopsview]
@@ -64,23 +64,35 @@ options:
     description:
       - Unique name for the object. Will be used to identify existing objects
         unless C(object_id) is specified.
+      - Must correspond with the host name in Opsview.
     required: true
-  parent:
+  collector:
     description:
-      - Name of the parent Host Group.
+      - The name of the flow collector as configured in Opsview.
     required: true
+  flow_type:
+    description:
+      - The flow protocol to be used.
+    choices: [netflow, sflow]
+    default: netflow
+  alt_address:
+    description:
+      - IP address from which flow data will be received if different from the
+        address stored for the host in Opsview.
 """
 
 EXAMPLES = """\
 ---
-- name: Create Host Group in Opsview
-  opsview_host_group:
+- name: Create Flow Source in Opsview
+  opsview_flow_source:
     username: admin
     password: initial
     endpoint: https://opsview.example.com
     state: updated
-    name: Production-LDN
-    parent: Production
+    name: cisco-uk-01
+    flow_type: sflow
+    alt_address: 10.0.17.24
+    collector: Master Collector
 """
 
 ARG_SPEC = {
@@ -111,11 +123,16 @@ ARG_SPEC = {
         "type": "int"
     },
     "name": {
-        "required": True
+        "required": True,
     },
-    "parent": {
-        "required": True
-    }
+    "collector": {
+        "required": True,
+    },
+    "flow_type": {
+        "default": "netflow",
+        "choices": ["netflow", "sflow"],
+    },
+    "alt_address": {},
 }
 
 
@@ -128,7 +145,7 @@ except ImportError:
 
 
 # The attribute for the client's manager
-MANAGER_OBJ_TYPE = 'hostgroups'
+MANAGER_OBJ_TYPE = 'flowsources'
 # Additional parameters used to GET existing objects
 GET_PARAMS = {}
 # Fields which are part of the module but are not part of the object
@@ -141,6 +158,46 @@ def hook_trans_compare(params):
     the existing object. This does not affect the final payload used for
     actually updating the object.
     """
+    if 'collector' in params and 'collector_id' not in params:
+        # Get the collector by name
+        collector = ovclient.config.flowcollectors\
+            .find_one(name=params['collector'])
+
+        if not collector:
+            module.fail_json(msg='No flow collector exists with name \'%s\'' %
+                             params['collector'])
+
+        # Set the collector ID and unset the collector name
+        params['collector_id'] = collector.get('id')
+
+    # Ensure that the flow type is lowercased
+    params['flow_type'] = params['flow_type'].lower()
+
+    if 'host_id' not in params:
+        # Get the IP address of the host by name
+        host = ovclient.config.hosts.find_one(name=params['name'])
+        if not host:
+            module.fail_json(msg='No host exists with name \'%s\'' %
+                             params['name'])
+
+        # Set the host ID
+        params['host_id'] = host.get('id')
+
+    if 'address' not in params:
+        # Set the host IP address and set the override flag if necessary
+        src_addr = params.get('alt_address')
+        if not src_addr:
+            src_addr = host['address']
+
+        params['ip_override'] = (src_addr != host['address'])
+        params['address'] = src_addr
+
+    for field in ('collector', 'name', 'alt_address'):
+        try:
+            del params[field]
+        except KeyError:
+            pass
+
     return params
 
 
@@ -149,7 +206,7 @@ def hook_trans_payload(params):
     object. This does not affect the comparison of objects when introspecting
     whether the object needs to be updated.
     """
-    return params
+    return hook_trans_compare(params)
 
 
 def init_module():
@@ -184,11 +241,14 @@ def init_client(username, endpoint, token=None, password=None, **kwds):
         warn('Consider using \'token\' instead of \'password\'. '
              'See the \'opsview_login\' module.')
 
+    global ovclient
     try:
-        return OpsviewClient(username=username, token=token, endpoint=endpoint,
-                             password=password, **kwds)
+        ovclient = OpsviewClient(username=username, token=token,
+                                 endpoint=endpoint, password=password, **kwds)
     except Exception as e:
         module.fail_json(msg=to_native(e), exception=traceback.format_exc())
+
+    return ovclient
 
 
 def get_config_manager(client, object_type):
@@ -319,6 +379,10 @@ def requires_update(encoder, obj_old, obj_new):
     except Exception as e:
         module.fail_json(msg=to_native(e), exception=traceback.format_exc())
 
+    import json
+    with open('/tmp/x.json', 'a') as f:
+        json.dump([old_encoded, new_encoded], f)
+
     assert isinstance(old_encoded, dict)
     assert isinstance(new_encoded, dict)
 
@@ -348,14 +412,18 @@ def main():
                             verify=module.params['verify_ssl'])
 
     manager = get_config_manager(ov_client, MANAGER_OBJ_TYPE)
+    host_manager = get_config_manager(ov_client, 'hosts')
 
-    # Identify the object by ID if given, otherwise name.
-    if module.params.get('object_id'):
-        ident = {'id': module.params['object_id']}
-    elif module.params.get('name'):
-        ident = {'name': module.params['name']}
+    existing_host = find_existing_obj(
+        host_manager, {'name': module.params['name']}
+    )
 
-    existing_obj = find_existing_obj(manager, ident, GET_PARAMS)
+    if existing_host and 'id' in existing_host:
+        existing_obj = find_existing_obj(
+            manager, {'host_id': existing_host['id']}, GET_PARAMS
+        )
+    else:
+        existing_obj = None
 
     # Get the callable for achieving the desired state
     state_handler = STATE_HANDLERS[module.params['state']]

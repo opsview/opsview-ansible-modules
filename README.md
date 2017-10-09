@@ -7,21 +7,25 @@
 ## Requirements
 
 * [ansible](https://github.com/ansible/ansible "ansible") >= 2.0
-* [pyopsview](https://github.com/opsview/pyopsview "pyopsview") >= 5.3.2
+* [pyopsview](https://github.com/opsview/pyopsview "pyopsview") >= 5.3.3
 
 ## Installing 
 
 ```bash
 # Replace /etc/ansible with wherever your playbooks live
 
-sudo pip install 'pyopsview>=5.3.2'
+sudo pip install 'pyopsview>=5.3.3'
 
 sudo mkdir /etc/ansible/library
 
-git clone https://github.com/opsview/ansible-modules-opsview.git
+git clone https://github.com/opsview/opsview-ansible-modules.git
 
-sudo cp -p ansible-modules-opsview/library/*.py /etc/ansible/library
+sudo cp -p opsview-ansible-modules/library/*.py /etc/ansible/library
 ```
+
+## Documentation
+
+All of the documentation is available with `ansible-doc`
 
 ## Examples
 
