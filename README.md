@@ -16,11 +16,13 @@
 
 sudo pip install 'pyopsview>=5.3.3'
 
-sudo mkdir /etc/ansible/library
+sudo mkdir /etc/ansible/library/
+sudo mkdir /etc/ansible/module_utils/
 
 git clone https://github.com/opsview/opsview-ansible-modules.git
 
 sudo cp -p opsview-ansible-modules/library/*.py /etc/ansible/library
+sudo cp -p opsview-ansible-modules/module_utils/*.py /etc/ansible/module_utils
 ```
 
 ## Documentation
