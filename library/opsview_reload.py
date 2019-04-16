@@ -1,25 +1,28 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-from __future__ import unicode_literals
+# (c) 2017, Opsview Ltd.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-import time
-import traceback
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.basic import to_native
+import os.path
+
+__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
-DOCUMENTATION = """\
+DOCUMENTATION = """
 ---
 module: opsview_reload
 short_description: Reload Opsview
 description:
   - Reloads an Opsview Monitor system
-version_added: '2.3'
+version_added: '2.5'
 author: Joshua Griffiths (@jpgxs)
 requirements: [pyopsview]
 options:
@@ -56,7 +59,7 @@ options:
     choices: ['yes', 'no']
 """
 
-EXAMPLES = """\
+EXAMPLES = """
 ---
 - name: Reload Opsview
   opsview_reload:
@@ -72,6 +75,18 @@ EXAMPLES = """\
     force: yes
     wait: no
 """
+
+RETURN = """
+---
+"""
+
+import time
+import traceback
+
+from ansible.module_utils import opsview as ov
+from ansible.module_utils.basic import to_native
+from ansible.module_utils.six import iteritems
+from ansible.module_utils.six import string_types
 
 ARG_SPEC = {
     "endpoint": {
@@ -99,6 +114,9 @@ ARG_SPEC = {
     }
 }
 
+# Used to ensure that none of the arguments are omitted
+ARG_KEYS = tuple(ARG_SPEC.keys())
+
 RELOAD_MESSAGES = {
     0: 'Server running with no warnings',
     1: 'Server reloading',
@@ -108,59 +126,30 @@ RELOAD_MESSAGES = {
 }
 
 
-try:
-    from pyopsview import OpsviewClient
-    import six
-    HAS_PYOV = True
-except ImportError:
-    HAS_PYOV = False
-
-
-def init_module():
-    global module
-    module = AnsibleModule(supports_check_mode=True, argument_spec=ARG_SPEC)
-    return module
-
-
-def warn(message):
-    module._warnings.append(message)
-    module.log('[WARNING] ' + message)
-
-
-def init_client(username, endpoint, token=None, password=None, **kwds):
-    if not (password or token):
-        module.fail_json(msg='\'password\' or \'token\' must be specified')
-
-    if password and not token:
-        warn('Consider using \'token\' instead of \'password\'. '
-             'See the \'opsview_login\' module.')
-
-    try:
-        return OpsviewClient(username=username, token=token, endpoint=endpoint,
-                             password=password, **kwds)
-    except Exception as e:
-        module.fail_json(msg=to_native(e), exception=traceback.format_exc())
-
-
 def get_reload_status(client):
+    """Get the current reload status and convert the stringy numbers into
+    real integers.
+    """
     status = client.reload_status()
-    for (key, value) in six.iteritems(status):
+    for (k, v) in iteritems(status):
         try:
-            status[key] = int(value)
+            status[k] = int(v)
         except Exception:
             pass
 
     return status
 
 
-def do_reload(client):
-    status = get_reload_status(client)
+def do_reload(module, opsview_client):
+    status = get_reload_status(opsview_client)
     reload_status = status['server_status']
     config_status = status['configuration_status']
 
     # Fail if a reload is not possible
     if reload_status in (1, 2):
-        module.fail_json(msg=RELOAD_MESSAGES[reload_status])
+        module.fail_json(
+            msg='Unable to reload Opsview: %s' % RELOAD_MESSAGES[reload_status]
+        )
 
     # Only reload if changes are pending or 'force' was specified
     if config_status.lower() == 'pending' or module.params.get('force'):
@@ -173,14 +162,15 @@ def do_reload(client):
         return module_status
 
     # requires a reload
-    client.reload(async=True)
+    opsview_client.reload(async=True)
 
     # don't return additional info unless wait was specified
     if not module.params.get('wait'):
         return module_status
 
+    # wait loop
     while True:
-        status = get_reload_status(client)
+        status = get_reload_status(opsview_client)
         reload_status = status['server_status']
         config_status = status['configuration_status']
 
@@ -194,30 +184,45 @@ def do_reload(client):
     if reload_status == 4:
         for message in status.get('messages', []):
             if 'detail' in message:
-                warn('Opsview: ' + message['detail'])
+                module.warn('Opsview: ' + message['detail'])
 
     elif reload_status in (2, 3):
         module.fail_json(msg='Failed to reload Opsview: %s' %
                          RELOAD_MESSAGES[reload_status])
 
-    module_status.update(status)
     return module_status
 
 
+def module_main(module):
+    verify = module.params['verify_ssl']
+
+    if not os.path.exists(verify):
+        verify = module.boolean(verify)
+
+    opsview_client = ov.new_opsview_client(
+        username=module.params['username'],
+        password=module.params['password'],
+        endpoint=module.params['endpoint'],
+        token=module.params['token'],
+        verify=verify,
+    )
+
+    return do_reload(module, opsview_client)
+
+
 def main():
-    init_module()
+    module = ov.new_module(ARG_SPEC, always_include=ARG_KEYS)
+    # Handle exception importing 'pyopsview'
+    if ov.PYOV_IMPORT_EXC is not None:
+        module.fail_json(msg=ov.PYOV_IMPORT_EXC[0],
+                         exception=ov.PYOV_IMPORT_EXC[1])
 
-    if not HAS_PYOV:
-        module.fail_json(msg='pyopsview is required')
+    try:
+        summary = module_main(module)
+    except Exception as e:
+        module.fail_json(msg=to_native(e), exception=traceback.format_exc())
 
-    ov_client = init_client(username=module.params['username'],
-                            password=module.params['password'],
-                            endpoint=module.params['endpoint'],
-                            token=module.params['token'],
-                            verify=module.params['verify_ssl'])
-
-    status = do_reload(ov_client)
-    module.exit_json(**status)
+    module.exit_json(**summary)
 
 
 if __name__ == '__main__':

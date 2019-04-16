@@ -1,24 +1,28 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-from __future__ import unicode_literals
+# (c) 2017, Opsview Ltd.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-import traceback
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.basic import to_native
+import os.path
+
+__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
-DOCUMENTATION = """\
+DOCUMENTATION = """
 ---
 module: opsview_login
 short_description: Log into Opsview
 description:
   - Retrieves an authentication token from an Opsview API.
-version_added: '2.3'
+version_added: '2.5'
 author: Joshua Griffiths (@jpgxs)
 requirements: [pyopsview]
 options:
@@ -41,7 +45,7 @@ options:
     default: 'yes'
 """
 
-EXAMPLES = """\
+EXAMPLES = """
 ---
 - name: Log into Opsview
   opsview_login:
@@ -53,6 +57,23 @@ EXAMPLES = """\
 - debug:
     msg: '{{ ov_login.token }}'
 """
+
+RETURN = """
+---
+token:
+  description: The authentication token for the Opsview server.
+  returned: success.
+  type: string
+opsview_version:
+  description: The software version for the Opsview server.
+  returned: success.
+  type: string
+"""
+
+import traceback
+
+from ansible.module_utils import opsview as ov
+from ansible.module_utils.basic import to_native
 
 ARG_SPEC = {
     "endpoint": {
@@ -71,45 +92,34 @@ ARG_SPEC = {
 }
 
 
-try:
-    from pyopsview import OpsviewClient
-    HAS_PYOV = True
-except ImportError:
-    HAS_PYOV = False
+def main():
+    module = ov.new_module(ARG_SPEC)
+    # Handle exception importing 'pyopsview'
+    if ov.PYOV_IMPORT_EXC is not None:
+        module.fail_json(msg=ov.PYOV_IMPORT_EXC[0],
+                         exception=ov.PYOV_IMPORT_EXC[1])
 
+    verify = module.params['verify_ssl']
 
-def init_module():
-    global module
-    module = AnsibleModule(supports_check_mode=True, argument_spec=ARG_SPEC)
-    return module
+    if not os.path.exists(verify):
+        verify = module.boolean(verify)
 
-
-def init_client(username, endpoint, password, **kwds):
     try:
-        return OpsviewClient(username=username, endpoint=endpoint,
-                             password=password, **kwds)
+        opsview_client = ov.new_opsview_client(
+            username=module.params['username'],
+            password=module.params['password'],
+            endpoint=module.params['endpoint'],
+            verify=verify,
+        )
+
+        summary = {'changed': True,
+                   'token': opsview_client.token,
+                   'opsview_version': opsview_client.version}
+
     except Exception as e:
         module.fail_json(msg=to_native(e), exception=traceback.format_exc())
 
-
-def main():
-    init_module()
-
-    if not HAS_PYOV:
-        module.fail_json(msg='pyopsview is required')
-
-    ov_client = init_client(username=module.params['username'],
-                            password=module.params['password'],
-                            endpoint=module.params['endpoint'],
-                            verify=module.params['verify_ssl'])
-
-    status = {
-        'changed': True,
-        'token': ov_client.token,
-        'opsview_version': ov_client.version,
-    }
-
-    module.exit_json(**status)
+    module.exit_json(**summary)
 
 
 if __name__ == '__main__':
