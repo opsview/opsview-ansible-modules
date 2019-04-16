@@ -82,8 +82,8 @@ All of the documentation is available with `ansible-doc`
         username: '{{ opsview_username }}'
         token: '{{ opsview_login.token }}'
         endpoint: '{{ opsview_endpoint }}'
-        name: '{{ ansible_hostname }}'
-        address: '{{ ansible_default_ipv4 }}'
+        name: '{{ ansible_hostname | default(inventory_hostname) }}'
+        address: '{{ ansible_default_ipv4.address }}'
         monitored_by: Master Monitoring Server
         host_group: Web Servers
         host_templates:
